@@ -46,7 +46,7 @@ int main(int argc, char** argv)
     glutCreateWindow("Oren's Chip8");
 
     glutDisplayFunc(display);
-    glutIdleFunc(display);
+    glutIdleFunc(redisplay);
     glutReshapeFunc(reshape_window);
     glutKeyboardFunc(keyboardDown);
     glutKeyboardUpFunc(keyboardUp);
@@ -64,10 +64,12 @@ void display()
 
     // TODO(oren): drawflag in example code, presumably this is timing related?
 
-    glClear(GL_COLOR_BUFFER_BIT);
-    updateTexture(c8);
-
-    glutSwapBuffers();
+    if (c8.drawFlag()) {
+        glClear(GL_COLOR_BUFFER_BIT);
+        updateTexture(c8);
+        glutSwapBuffers();
+        c8.resetDrawFlag();
+    }
 }
 
 void setupTexture()
