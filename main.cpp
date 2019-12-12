@@ -4,12 +4,12 @@
 
 #include <GL/freeglut.h>
 
-#define SCREEN_WIDTH 64
-#define SCREEN_HEIGHT 32
 #define SCREEN_SCALE 20
 
 #define PRESS 1
 #define RELEASE 0
+
+using chip8::Chip8;
 
 int display_width = SCREEN_WIDTH * SCREEN_SCALE;
 int display_height = SCREEN_HEIGHT * SCREEN_SCALE;
@@ -23,17 +23,20 @@ void redisplay(void);
 
 uint8_t screen_data[SCREEN_HEIGHT][SCREEN_WIDTH][3];
 void setupTexture();
-void updateTexture();
+void updateTexture(Chip8& c8);
 void reshape_window(GLsizei w, GLsizei h);
+
+Chip8 c8;
 
 int main(int argc, char** argv)
 {
     if (argc < 2) {
         std::cout << "USAGE: chip8-emu /path/to/app" << std::endl;
         exit(1);
+    } else  if (!c8.loadApp(argv[1])) {
+        std::cout << "BAD FILE: " << argv[1] << std::endl;
+        exit(1);
     }
-
-    // TODO(oren): load the game here
 
     glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA);
@@ -57,10 +60,12 @@ int main(int argc, char** argv)
 
 void display()
 {
-    // TODO(oren): step the emulator, check drawflag?
+    c8.cycle();
+
+    // TODO(oren): drawflag in example code, presumably this is timing related?
 
     glClear(GL_COLOR_BUFFER_BIT);
-    updateTexture();
+    updateTexture(c8);
 
     glutSwapBuffers();
 }
@@ -84,15 +89,9 @@ void setupTexture()
 }
 
 // TODO(oren): add the interpreter object as param
-void updateTexture()
+void updateTexture(Chip8& c8)
 {
-    // populate screen data with interpreter graphix buffer
-
-    // for (int y = 0; y < SCREEN_HEIGHT; y++) {
-    //     for (int x = 0; x < SCREEN_WIDTH; x++) {
-    //         screen_data[y][x][0] = screen_data[y][x][1] = screen_data[y][x][2] = c_val;
-    //     }
-    // }
+    c8.exportScreenBuf(screen_data);
 
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, GL_RGB, GL_UNSIGNED_BYTE, (GLvoid*) screen_data);
 
@@ -162,28 +161,26 @@ void keyboardUp(unsigned char key, int x, int y)
 
 void keyboardHelper(unsigned char key, uint8_t state)
 {
-    (void) key;
-    (void) state;
 
-    // if(key == '1')	myChip8.setKey(0x1, state);
-    // else if(key == '2')	myChip8.setKey(0x2, state);
-    // else if(key == '3')	myChip8.setKey(0x3, state);
-    // else if(key == '4')	myChip8.setKey(0xC, state);
+    if(key == '1')	c8.setKey(0x1, state);
+    else if(key == '2')	c8.setKey(0x2, state);
+    else if(key == '3')	c8.setKey(0x3, state);
+    else if(key == '4')	c8.setKey(0xC, state);
 
-    // else if(key == 'q')	myChip8.setKey(0x4, state);
-    // else if(key == 'w')	myChip8.setKey(0x5, state);
-    // else if(key == 'e')	myChip8.setKey(0x6, state);
-    // else if(key == 'r')	myChip8.setKey(0xD, state);
+    else if(key == 'q')	c8.setKey(0x4, state);
+    else if(key == 'w')	c8.setKey(0x5, state);
+    else if(key == 'e')	c8.setKey(0x6, state);
+    else if(key == 'r')	c8.setKey(0xD, state);
 
-    // else if(key == 'a')	myChip8.setKey(0x7, state);
-    // else if(key == 's')	myChip8.setKey(0x8, state);
-    // else if(key == 'd')	myChip8.setKey(0x9, state);
-    // else if(key == 'f')	myChip8.setKey(0xE, state);
+    else if(key == 'a')	c8.setKey(0x7, state);
+    else if(key == 's')	c8.setKey(0x8, state);
+    else if(key == 'd')	c8.setKey(0x9, state);
+    else if(key == 'f')	c8.setKey(0xE, state);
 
-    // else if(key == 'z')	myChip8.setKey(0xA, state);
-    // else if(key == 'x')	myChip8.setKey(0x0, state);
-    // else if(key == 'c')	myChip8.setKey(0xB, state);
-    // else if(key == 'v')	myChip8.setKey(0xF, state);
+    else if(key == 'z')	c8.setKey(0xA, state);
+    else if(key == 'x')	c8.setKey(0x0, state);
+    else if(key == 'c')	c8.setKey(0xB, state);
+    else if(key == 'v')	c8.setKey(0xF, state);
 }
 
 
