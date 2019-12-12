@@ -5,11 +5,16 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <unistd.h>
 
 #define CODE_START 0x200
 #define CODE_END 0xEA0
+#define TIMER_PERIOD_US 16667
 
 using std::array;
+using std::chrono::duration_cast;
+using std::chrono::microseconds;
+using std::chrono::steady_clock;
 using std::ifstream;
 using std::make_unique;
 using std::stack;
@@ -46,6 +51,7 @@ Chip8::Chip8():
     , sound_timer_(0xF)
     , kp_await_(false)
     , draw_flag_(false)
+    , last_timer_step_(steady_clock::now())
 {
     for (int i = 0; i < 80; i++) {
         memory_[i] = chip8_fontset[i];
@@ -81,10 +87,23 @@ void Chip8::cycle()
         // std::cout << "0x" << std::hex << opcode << std::endl;
 
         decode_and_exec(opcode);
+    } else {
+        std::cout << "waiting" << std::endl;
     }
 
-    // TODO(oren): do timers
-    if (sound_timer_ > 0) std::cout << '\a';
+    auto now = steady_clock::now();
+    auto us_since_inc = duration_cast<microseconds>(now - last_timer_step_);
+    if (us_since_inc.count() >= TIMER_PERIOD_US) {
+        last_timer_step_ = now;
+        if (sound_timer_ > 0) {
+            std::cout << '\a';
+            sound_timer_--;
+        }
+
+        if (delay_timer_ > 0) {
+            delay_timer_--;
+        }
+    }
 }
 
 void Chip8::setKey(uint8_t key, bool state)
@@ -112,7 +131,7 @@ void Chip8::exportScreenBuf(uint8_t dest[][SCREEN_WIDTH][3])
 
 uint16_t Chip8::fetch_opcode()
 {
-    return ((memory_[pc_] << 8) | memory_[pc_+1]);
+    return ((memory_[pc_] << 8) | memory_[pc_ + 1]);
 }
 
 void Chip8::decode_and_exec(uint16_t opcode)
@@ -120,11 +139,11 @@ void Chip8::decode_and_exec(uint16_t opcode)
     // first, have a peek at the top nibble
     uint16_t instr = opcode & 0xF000;
 
-    uint8_t VX  = (opcode & 0x0F00) >> 8;
-    uint8_t VY  = (opcode & 0x00F0) >> 4;
-    uint8_t NNN = opcode & 0x0FFF;
-    uint8_t NN  = opcode & 0x00FF;
-    uint8_t N   = opcode & 0x000F;
+    uint8_t  VX  = (opcode & 0x0F00) >> 8;
+    uint8_t  VY  = (opcode & 0x00F0) >> 4;
+    uint16_t NNN = opcode & 0x0FFF;
+    uint8_t  NN  = opcode & 0x00FF;
+    uint8_t  N   = opcode & 0x000F;
 
     switch(instr) {
     case 0x0000:
@@ -198,6 +217,7 @@ void Chip8::decode_and_exec(uint16_t opcode)
         ss << "Invalid Opcode: " << std::hex << opcode;
         throw std::runtime_error(ss.str());
     }
+    pc_ += 2;
 }
 
 void Chip8::clear_screen()
@@ -263,7 +283,26 @@ void Chip8::apply_register_op(uint8_t VX, uint8_t VY, uint8_t op)
 
 void Chip8::draw_sprite(uint8_t VX, uint8_t VY, uint8_t height)
 {
-    
+    uint8_t x = regs_[VX];
+    uint8_t y = regs_[VY];
+    uint8_t sprite_pixel;
+    uint8_t curr_pixel;
+
+    regs_[0xF] = 0;
+
+    for (int i = 0; i < height && i < SCREEN_HEIGHT; i++) {
+        uint8_t row = memory_[idx_ + i];
+        for (int j = 0; j < 8; j++) {
+            sprite_pixel = (row & 0x80) >> 7;
+            curr_pixel = screen_buffer_[y + i][x + j];
+            screen_buffer_[y + i][x + j] ^= sprite_pixel;
+            if (curr_pixel && !screen_buffer_[y + i][x + j]) {
+                regs_[0xF] = 1;
+            }
+            row <<= 1;
+        }
+    }
+    draw_flag_ = true;
 }
 
 void Chip8::apply_special_op(uint8_t VX, uint8_t op)
@@ -274,7 +313,6 @@ void Chip8::apply_special_op(uint8_t VX, uint8_t op)
         regs_[VX] = delay_timer_;
         break;
     case 0x0A:
-        // TODO(oren): implement blocking get_key
         kp_await_ = true;
         kp_which_ = regs_[VX];
         break;
@@ -294,7 +332,8 @@ void Chip8::apply_special_op(uint8_t VX, uint8_t op)
         break;
     case 0x33:
         // TODO(oren): implement binary coded decimal...
-        draw_flag_ = true;
+        // draw_flag_ = true;
+        std::cout << "binary coded decimal" << std::endl;
         break;
     case 0x55:
         // dump registers

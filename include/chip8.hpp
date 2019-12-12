@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <stack>
@@ -54,6 +55,8 @@ private:
     std::array<std::array<uint8_t, SCREEN_WIDTH>, SCREEN_HEIGHT> screen_buffer_;
 
     bool draw_flag_;
+
+    std::chrono::time_point<std::chrono::steady_clock> last_timer_step_;
     
 };
 
