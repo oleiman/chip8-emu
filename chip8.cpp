@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <thread>
 #include <unistd.h>
 
 #define CODE_START 0x200
@@ -25,7 +26,7 @@ using std::stringstream;
 
 namespace chip8 {
 
-unsigned char chip8_fontset[80] =
+uint8_t chip8_fontset[80] =
 { 
     0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
     0x20, 0x60, 0x20, 0x20, 0x70, // 1
@@ -56,7 +57,6 @@ Chip8::Chip8():
     for (int i = 0; i < 80; i++) {
         memory_[i] = chip8_fontset[i];
     }
-
     srand(time(0));
 }
 
@@ -66,7 +66,6 @@ bool Chip8::loadApp(const string& app)
     if (!infile) {
         return false;
     }
-        
     infile.read(reinterpret_cast<char*>(memory_.data()) + CODE_START, CODE_END - CODE_START);
     if (!infile) {
         auto bytes_read = infile.gcount();
@@ -74,21 +73,19 @@ bool Chip8::loadApp(const string& app)
         infile.seekg(0);
         infile.read(reinterpret_cast<char*>(memory_.data()) + CODE_START, bytes_read);
     }
-        
     return infile ? true : false;
 }
 
 void Chip8::cycle()
 {
     if (!kp_await_) {
-    
         // fetch opcode
         uint16_t opcode = fetch_opcode();
-        // std::cout << "0x" << std::hex << opcode << std::endl;
-
         decode_and_exec(opcode);
-    } else {
-        std::cout << "waiting" << std::endl;
+        if (kp_debounce_) {
+            usleep(512);
+            kp_debounce_--;
+        }
     }
 
     auto now = steady_clock::now();
@@ -99,7 +96,6 @@ void Chip8::cycle()
             std::cout << '\a';
             sound_timer_--;
         }
-
         if (delay_timer_ > 0) {
             delay_timer_--;
         }
@@ -113,6 +109,7 @@ void Chip8::setKey(uint8_t key, bool state)
         if (kp_await_ && key == kp_which_) {
             kp_await_ = false;
         }
+        kp_debounce_ = 0xFF;
     }
 }
 
@@ -122,8 +119,10 @@ void Chip8::exportScreenBuf(uint8_t dest[][SCREEN_WIDTH][3])
         for (int x = 0; x < SCREEN_WIDTH; x++) {
             if (screen_buffer_[y][x] == 0) {
                 dest[y][x][0] = dest[y][x][1] = dest[y][x][2] = 0;
-            } else {
+            } else if (screen_buffer_[y][x] == 1) {
                 dest[y][x][0] = dest[y][x][1] = dest[y][x][2] = 255;
+            } else {
+                throw std::runtime_error("nonbinary value in screen buffer");
             }
         }
     }
@@ -138,7 +137,6 @@ void Chip8::decode_and_exec(uint16_t opcode)
 {
     // first, have a peek at the top nibble
     uint16_t instr = opcode & 0xF000;
-
     uint8_t  VX  = (opcode & 0x0F00) >> 8;
     uint8_t  VY  = (opcode & 0x00F0) >> 4;
     uint16_t NNN = opcode & 0x0FFF;
@@ -155,11 +153,14 @@ void Chip8::decode_and_exec(uint16_t opcode)
             // TODO(oren): RCA 1802 program?
         }
         break;
-    case 0x2000:
-        stack_.push(pc_);
     case 0x1000:
         pc_ = NNN;
         pc_ -= 2; // So we can increment PC after the switch
+        break;
+    case 0x2000:
+        stack_.push(pc_);
+        pc_ = NNN;
+        pc_ -= 2;
         break;
     case 0x3000:
         if (regs_[VX] == NN) {
@@ -194,7 +195,7 @@ void Chip8::decode_and_exec(uint16_t opcode)
         idx_ = NNN;
         break;
     case 0xB000:
-        pc_ = regs_[0x0] + NNN;
+        pc_ = NNN + regs_[0x0];
         pc_ -= 2; // so we can increment PC after the switch
         break;
     case 0xC000:
@@ -204,7 +205,7 @@ void Chip8::decode_and_exec(uint16_t opcode)
         draw_sprite(VX, VY, N);
         break;
     case 0xE000:
-        if ( (NN == 0x9E && keys_[regs_[VX]]) ||
+        if ( (NN == 0x9E &&  keys_[regs_[VX]]) ||
              (NN == 0xA1 && !keys_[regs_[VX]]) ) {
             pc_ += 2;
         }
@@ -256,7 +257,8 @@ void Chip8::apply_register_op(uint8_t VX, uint8_t VY, uint8_t op)
         // 1 for carry, 0 for no carry
         tmp_16 = regs_[VX] + regs_[VY];
         regs_[0xF] = tmp_16 > 0xFF ? 0x01 : 0x00;
-        regs_[VX] = tmp_16 & 0xFF;
+        regs_[VX] += regs_[VY];
+        // regs_[VX] = tmp_16 & 0xFF;
         break;
     case 5:
         // 0 for borrow, 1 for no borrow
@@ -289,10 +291,9 @@ void Chip8::draw_sprite(uint8_t VX, uint8_t VY, uint8_t height)
     uint8_t curr_pixel;
 
     regs_[0xF] = 0;
-
-    for (int i = 0; i < height && i < SCREEN_HEIGHT; i++) {
+    for (int i = 0; i < height && y + i < SCREEN_HEIGHT; i++) {
         uint8_t row = memory_[idx_ + i];
-        for (int j = 0; j < 8; j++) {
+        for (int j = 0; j < 8 && x + j < SCREEN_WIDTH; j++) {
             sprite_pixel = (row & 0x80) >> 7;
             curr_pixel = screen_buffer_[y + i][x + j];
             screen_buffer_[y + i][x + j] ^= sprite_pixel;
@@ -325,28 +326,29 @@ void Chip8::apply_special_op(uint8_t VX, uint8_t op)
     case 0x1E:
         idx_ += regs_[VX];
         regs_[0xF] = idx_ > 0x0FFF ? 1 : 0;
+        idx_ &= 0x0FFF;
         // TODO(oren): should we allow the overflow to stay in idx_ or guard against?
         break;
     case 0x29:
-        idx_ = memory_[regs_[VX] * 5];
+        idx_ = regs_[VX] * 5;
         break;
     case 0x33:
-        // TODO(oren): implement binary coded decimal...
-        // draw_flag_ = true;
-        std::cout << "binary coded decimal" << std::endl;
+        memory_[idx_] = regs_[VX] / 100;
+        memory_[idx_+1] = (regs_[VX] % 100) / 10;
+        memory_[idx_+2] = regs_[VX] % 10;
         break;
     case 0x55:
         // dump registers
         tmp_16 = idx_;
-        for (const auto& reg : regs_) {
-            memory_[tmp_16++] = reg;
+        for (int i = 0; i <= VX; i++) {
+            memory_[tmp_16++] = regs_[i];
         }
         break;
     case 0x65:
         // load registers
         tmp_16 = idx_;
-        for (auto& reg : regs_) {
-            reg = memory_[tmp_16++];
+        for (int i = 0; i <= VX; i++) {
+            regs_[i] = memory_[tmp_16++];
         }
         break;
     default:

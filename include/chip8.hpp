@@ -52,6 +52,7 @@ private:
     std::array<uint8_t, N_KEYS> keys_;
     bool kp_await_;
     uint8_t kp_which_;
+    uint8_t kp_debounce_;
     std::array<std::array<uint8_t, SCREEN_WIDTH>, SCREEN_HEIGHT> screen_buffer_;
 
     bool draw_flag_;
